@@ -62,7 +62,7 @@ const textModel = 'gemini-2.5-flash';
 
 export const generateModelImage = async (userImage: File): Promise<string> => {
     const userImagePart = await fileToPart(userImage);
-    const prompt = "You are an expert fashion photographer AI. Transform the person in this image into a full-body fashion model photo suitable for an e-commerce website. The background must be a clean, neutral studio backdrop (light gray, #f0f0f0). The person should have a neutral, professional model expression. Preserve the person's identity, unique features, and body type, but place them in a standard, relaxed standing model pose. The final image must be photorealistic. Return ONLY the final image.";
+    const prompt = "You are an expert photo editor. Your task is to isolate the person in this image and place them on a clean, neutral studio backdrop (light gray, #f0f0f0). Do NOT change the person's appearance, clothing, or pose. The final image should be photorealistic and centered. If the original image is not a full-body shot, create a well-composed portrait. Return ONLY the final image.";
     const response = await ai.models.generateContent({
         model: imageModel,
         contents: { parts: [userImagePart, { text: prompt }] },
@@ -186,4 +186,28 @@ export const getColorPalette = async (imageUrl: string): Promise<string[]> => {
         console.error("Failed to parse color palette JSON:", jsonText, e);
         throw new Error("The AI model returned a malformed color palette.");
     }
+};
+
+const PHOTOSHOOT_PROMPTS = [
+    "Recreate this image in a cinematic, street style photo taken in Tokyo at night, with vibrant neon lights blurring in the background.",
+    "Recreate this image as a high-fashion editorial shot. The model should be in a minimalist, brutalist architectural setting with dramatic shadows.",
+    "Recreate this image as a candid, joyful lifestyle photo. The model should be laughing, set against a vibrant, colorful mural in a sunny, urban park.",
+];
+
+export const generatePhotoshoot = async (baseImageUrl: string): Promise<string[]> => {
+    const baseImagePart = dataUrlToPart(baseImageUrl);
+
+    const photoshootPromises = PHOTOSHOOT_PROMPTS.map(prompt => {
+        const fullPrompt = `You are an expert creative director and photographer AI. Your task is to completely reimagine the provided image based on a creative brief. The person and their clothing must remain the same, but you will change their pose, expression, and the entire background to fit the new scene. The lighting should be adjusted to be consistent with the new environment. The creative brief is: "${prompt}". Return ONLY the final, edited image.`;
+
+        return ai.models.generateContent({
+            model: imageModel,
+            contents: { parts: [baseImagePart, { text: fullPrompt }] },
+            config: {
+                responseModalities: [Modality.IMAGE, Modality.TEXT],
+            },
+        }).then(handleApiResponse);
+    });
+
+    return Promise.all(photoshootPromises);
 };

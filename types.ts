@@ -15,3 +15,17 @@ export interface OutfitLayer {
 }
 
 export type ColorPalette = string[];
+
+export interface EditorState {
+  modelImageUrl: string | null;
+  outfitHistory: OutfitLayer[];
+  currentOutfitIndex: number;
+  currentPoseIndex: number;
+}
+
+export interface SavedLook {
+  id: string;
+  thumbnailUrl: string;
+  savedAt: string; // ISO date string
+  editorState: EditorState;
+}

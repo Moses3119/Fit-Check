@@ -14,12 +14,13 @@ import Footer from './components/Footer';
 import LegalModal from './components/LegalModal';
 import SupportModal from './components/SupportModal';
 import Tutorial from './components/Tutorial';
-import { generateVirtualTryOnImage, generatePoseVariation, generateBackground, getStyleSuggestion, getColorPalette } from './services/geminiService';
-import { OutfitLayer, WardrobeItem, ColorPalette } from './types';
-import { ChevronDownIcon, ChevronUpIcon } from './components/icons';
+import { generateVirtualTryOnImage, generatePoseVariation, generateBackground, getStyleSuggestion, getColorPalette, generatePhotoshoot } from './services/geminiService';
+import { OutfitLayer, WardrobeItem, ColorPalette, SavedLook, EditorState } from './types';
+import { ChevronDownIcon, ChevronUpIcon, XIcon } from './components/icons';
 import { defaultWardrobe } from './wardrobe';
 import { getFriendlyErrorMessage } from './lib/utils';
 import Spinner from './components/Spinner';
+import SavedLooksPanel from './components/SavedLooksPanel';
 
 const POSE_INSTRUCTIONS = [
   "Full frontal view, hands on hips",
@@ -51,15 +52,131 @@ const useMediaQuery = (query: string): boolean => {
   return matches;
 };
 
+const useUndoableState = <T,>(initialState: T) => {
+  const [history, setHistory] = useState([initialState]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  const state = history[currentIndex];
+
+  const setState = useCallback((newState: T | ((prevState: T) => T)) => {
+    const resolvedState = typeof newState === 'function' 
+      ? (newState as (prevState: T) => T)(state) 
+      : newState;
+
+    if (JSON.stringify(resolvedState) === JSON.stringify(state)) {
+        return;
+    }
+
+    const newHistory = history.slice(0, currentIndex + 1);
+    newHistory.push(resolvedState);
+    
+    setHistory(newHistory);
+    setCurrentIndex(newHistory.length - 1);
+  }, [history, currentIndex, state]);
+
+  const undo = useCallback(() => {
+    if (currentIndex > 0) {
+      setCurrentIndex(currentIndex - 1);
+    }
+  }, [currentIndex]);
+
+  const redo = useCallback(() => {
+    if (currentIndex < history.length - 1) {
+      setCurrentIndex(currentIndex + 1);
+    }
+  }, [currentIndex, history.length]);
+
+  const canUndo = currentIndex > 0;
+  const canRedo = currentIndex < history.length - 1;
+
+  const resetState = useCallback((newState: T) => {
+    setHistory([newState]);
+    setCurrentIndex(0);
+  }, []);
+
+  return { state, setState, undo, redo, canUndo, canRedo, resetState };
+};
+
+const PhotoshootModal: React.FC<{
+  isOpen: boolean;
+  onClose: () => void;
+  images: (string | null)[];
+  isLoading: boolean;
+}> = ({ isOpen, onClose, images, isLoading }) => {
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={onClose}
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+        >
+          <motion.div
+            initial={{ scale: 0.95, y: 20 }}
+            animate={{ scale: 1, y: 0 }}
+            exit={{ scale: 0.95, y: 20 }}
+            onClick={(e) => e.stopPropagation()}
+            className="relative bg-white dark:bg-gray-800 rounded-2xl w-full max-w-4xl max-h-[80vh] flex flex-col shadow-xl border border-gray-200 dark:border-gray-700"
+          >
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-2xl font-serif font-bold text-gray-800 dark:text-gray-200">AI Photoshoot</h2>
+              <button
+                onClick={onClose}
+                className="p-2 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                aria-label="Close"
+              >
+                <XIcon className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {(isLoading && images.length === 0 ? [null, null, null] : images).map((image, index) => (
+                  <div key={index} className="aspect-[2/3] bg-gray-100 dark:bg-gray-900 rounded-lg overflow-hidden flex items-center justify-center">
+                    {image ? (
+                       <img src={image} alt={`Photoshoot image ${index + 1}`} className="w-full h-full object-cover animate-fade-in" />
+                    ) : (
+                      <div className="flex flex-col items-center gap-2 text-gray-500">
+                        <Spinner />
+                        <span className="text-sm font-medium">Generating...</span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+};
+
 
 const App: React.FC = () => {
-  const [modelImageUrl, setModelImageUrl] = useState<string | null>(null);
-  const [outfitHistory, setOutfitHistory] = useState<OutfitLayer[]>([]);
-  const [currentOutfitIndex, setCurrentOutfitIndex] = useState(0);
+  const initialEditorState: EditorState = {
+    modelImageUrl: null,
+    outfitHistory: [],
+    currentOutfitIndex: 0,
+    currentPoseIndex: 0,
+  };
+  
+  const { 
+    state: editorState, 
+    setState: setEditorState, 
+    undo, 
+    redo, 
+    canUndo, 
+    canRedo,
+    resetState: resetEditorState,
+  } = useUndoableState(initialEditorState);
+
+  const { modelImageUrl, outfitHistory, currentOutfitIndex, currentPoseIndex } = editorState;
+
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [currentPoseIndex, setCurrentPoseIndex] = useState(0);
   const [isSheetCollapsed, setIsSheetCollapsed] = useState(false);
   const [wardrobe, setWardrobe] = useState<WardrobeItem[]>(defaultWardrobe);
   const [stylistSuggestion, setStylistSuggestion] = useState<string | null>(null);
@@ -67,15 +184,32 @@ const App: React.FC = () => {
   const [isStyling, setIsStyling] = useState(false);
   const isMobile = useMediaQuery('(max-width: 767px)');
   
-  // New state for new features
   const [theme, setTheme] = useState<'light' | 'dark'>(() => (localStorage.getItem('theme') as 'light' | 'dark') || 'light');
   const [showTutorial, setShowTutorial] = useState(() => !localStorage.getItem('hasSeenTutorial'));
   const [modalContent, setModalContent] = useState<'privacy' | 'terms' | 'support' | null>(null);
+  const [savedLooks, setSavedLooks] = useState<SavedLook[]>([]);
+  const [isShooting, setIsShooting] = useState(false);
+  const [photoshootResult, setPhotoshootResult] = useState<(string | null)[]>([]);
+  const [isPhotoshootModalOpen, setIsPhotoshootModalOpen] = useState(false);
+
+  const isBusy = isLoading || isStyling || isShooting;
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
     localStorage.setItem('theme', theme);
   }, [theme]);
+
+  useEffect(() => {
+    try {
+      const storedLooks = localStorage.getItem('savedLooks');
+      if (storedLooks) {
+        setSavedLooks(JSON.parse(storedLooks));
+      }
+    } catch (e) {
+      console.error("Failed to load saved looks from localStorage", e);
+      localStorage.removeItem('savedLooks');
+    }
+  }, []);
 
   const toggleTheme = () => setTheme(prevTheme => prevTheme === 'light' ? 'dark' : 'light');
 
@@ -108,24 +242,28 @@ const App: React.FC = () => {
     const currentLayer = outfitHistory[currentOutfitIndex];
     return currentLayer ? Object.keys(currentLayer.poseImages) : [];
   }, [outfitHistory, currentOutfitIndex]);
+  
+  const isLookSaved = useMemo(() => 
+    savedLooks.some(look => look.thumbnailUrl === displayImageUrl),
+    [savedLooks, displayImageUrl]
+  );
 
   const handleModelFinalized = (url: string) => {
-    setModelImageUrl(url);
-    setOutfitHistory([{
-      garment: null,
-      poseImages: { [POSE_INSTRUCTIONS[0]]: url }
-    }]);
-    setCurrentOutfitIndex(0);
+    resetEditorState({
+      ...initialEditorState,
+      modelImageUrl: url,
+      outfitHistory: [{
+        garment: null,
+        poseImages: { [POSE_INSTRUCTIONS[0]]: url }
+      }],
+    });
   };
 
   const handleStartOver = () => {
-    setModelImageUrl(null);
-    setOutfitHistory([]);
-    setCurrentOutfitIndex(0);
+    resetEditorState(initialEditorState);
     setIsLoading(false);
     setLoadingMessage('');
     setError(null);
-    setCurrentPoseIndex(0);
     setIsSheetCollapsed(false);
     setWardrobe(defaultWardrobe);
     setStylistSuggestion(null);
@@ -139,13 +277,12 @@ const App: React.FC = () => {
   }
 
   const handleGarmentSelect = useCallback(async (garmentFile: File, garmentInfo: WardrobeItem) => {
-    if (!displayImageUrl || isLoading) return;
+    if (!displayImageUrl || isBusy) return;
     clearSuggestions();
 
     const nextLayer = outfitHistory[currentOutfitIndex + 1];
     if (nextLayer && nextLayer.garment?.id === garmentInfo.id) {
-        setCurrentOutfitIndex(prev => prev + 1);
-        setCurrentPoseIndex(0);
+        setEditorState(prev => ({ ...prev, currentOutfitIndex: prev.currentOutfitIndex + 1 }));
         return;
     }
 
@@ -162,11 +299,14 @@ const App: React.FC = () => {
         poseImages: { [currentPoseInstruction]: newImageUrl } 
       };
 
-      setOutfitHistory(prevHistory => {
-        const newHistory = prevHistory.slice(0, currentOutfitIndex + 1);
-        return [...newHistory, newLayer];
+      setEditorState(prev => {
+        const newHistory = prev.outfitHistory.slice(0, prev.currentOutfitIndex + 1);
+        return {
+          ...prev,
+          outfitHistory: [...newHistory, newLayer],
+          currentOutfitIndex: prev.currentOutfitIndex + 1,
+        };
       });
-      setCurrentOutfitIndex(prev => prev + 1);
       
       setWardrobe(prev => {
         if (prev.find(item => item.id === garmentInfo.id)) {
@@ -181,25 +321,17 @@ const App: React.FC = () => {
       setIsLoading(false);
       setLoadingMessage('');
     }
-  }, [displayImageUrl, isLoading, currentPoseIndex, outfitHistory, currentOutfitIndex]);
-
-  const handleRemoveLastGarment = () => {
-    if (currentOutfitIndex > 0) {
-      setCurrentOutfitIndex(prevIndex => prevIndex - 1);
-      setCurrentPoseIndex(0);
-      clearSuggestions();
-    }
-  };
+  }, [displayImageUrl, isBusy, currentPoseIndex, outfitHistory, currentOutfitIndex, setEditorState]);
   
   const handlePoseSelect = useCallback(async (newIndex: number) => {
-    if (isLoading || outfitHistory.length === 0 || newIndex === currentPoseIndex) return;
+    if (isBusy || outfitHistory.length === 0 || newIndex === currentPoseIndex) return;
     clearSuggestions();
     
     const poseInstruction = POSE_INSTRUCTIONS[newIndex];
     const currentLayer = outfitHistory[currentOutfitIndex];
 
     if (currentLayer.poseImages[poseInstruction]) {
-      setCurrentPoseIndex(newIndex);
+      setEditorState(prev => ({ ...prev, currentPoseIndex: newIndex }));
       return;
     }
 
@@ -209,30 +341,32 @@ const App: React.FC = () => {
     setError(null);
     setIsLoading(true);
     setLoadingMessage(`Changing pose...`);
-    
-    const prevPoseIndex = currentPoseIndex;
-    setCurrentPoseIndex(newIndex);
 
     try {
       const newImageUrl = await generatePoseVariation(baseImageForPoseChange, poseInstruction);
-      setOutfitHistory(prevHistory => {
-        const newHistory = [...prevHistory];
-        const updatedLayer = newHistory[currentOutfitIndex];
-        updatedLayer.poseImages[poseInstruction] = newImageUrl;
-        return newHistory;
+      setEditorState(prev => {
+        const newOutfitHistory = [...prev.outfitHistory];
+        const updatedLayer = { ...newOutfitHistory[prev.currentOutfitIndex] };
+        updatedLayer.poseImages = { ...updatedLayer.poseImages, [poseInstruction]: newImageUrl };
+        newOutfitHistory[prev.currentOutfitIndex] = updatedLayer;
+
+        return {
+          ...prev,
+          outfitHistory: newOutfitHistory,
+          currentPoseIndex: newIndex,
+        };
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(getFriendlyErrorMessage(message, 'Failed to change pose'));
-      setCurrentPoseIndex(prevPoseIndex);
     } finally {
       setIsLoading(false);
       setLoadingMessage('');
     }
-  }, [currentPoseIndex, outfitHistory, isLoading, currentOutfitIndex]);
+  }, [currentPoseIndex, outfitHistory, isBusy, currentOutfitIndex, setEditorState]);
 
   const handleBackgroundChange = useCallback(async (backgroundPrompt: string) => {
-    if (!displayImageUrl || isLoading) return;
+    if (!displayImageUrl || isBusy) return;
     clearSuggestions();
 
     setError(null);
@@ -241,12 +375,13 @@ const App: React.FC = () => {
 
     try {
       const newImageUrl = await generateBackground(displayImageUrl, backgroundPrompt);
-      setOutfitHistory(prevHistory => {
-        const newHistory = [...prevHistory];
-        const currentLayer = newHistory[currentOutfitIndex];
-        const currentPoseInstruction = POSE_INSTRUCTIONS[currentPoseIndex];
-        currentLayer.poseImages[currentPoseInstruction] = newImageUrl;
-        return newHistory;
+      setEditorState(prev => {
+        const newOutfitHistory = [...prev.outfitHistory];
+        const currentLayer = { ...newOutfitHistory[prev.currentOutfitIndex] };
+        const currentPoseInstruction = POSE_INSTRUCTIONS[prev.currentPoseIndex];
+        currentLayer.poseImages = { ...currentLayer.poseImages, [currentPoseInstruction]: newImageUrl };
+        newOutfitHistory[prev.currentOutfitIndex] = currentLayer;
+        return { ...prev, outfitHistory: newOutfitHistory };
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -255,7 +390,7 @@ const App: React.FC = () => {
       setIsLoading(false);
       setLoadingMessage('');
     }
-  }, [displayImageUrl, isLoading, currentOutfitIndex, currentPoseIndex]);
+  }, [displayImageUrl, isBusy, setEditorState]);
 
   const handleGetSuggestion = useCallback(async () => {
     if (!displayImageUrl || isStyling) return;
@@ -272,14 +407,94 @@ const App: React.FC = () => {
       setStylistSuggestion(suggestion);
       setColorPalette(palette);
     } catch (err) {
-      // FIX: The error object from a try-catch block is of type `unknown`.
-      // It must be converted to a string before being passed to another function.
       const message = err instanceof Error ? err.message : String(err);
       setError(getFriendlyErrorMessage(message, 'Failed to get style suggestion'));
     } finally {
       setIsStyling(false);
     }
   }, [displayImageUrl, isStyling]);
+
+  const handleSaveLook = useCallback(() => {
+    if (!displayImageUrl || !modelImageUrl || isLookSaved) return;
+
+    const newSavedLook: SavedLook = {
+      id: `look-${Date.now()}`,
+      thumbnailUrl: displayImageUrl,
+      savedAt: new Date().toISOString(),
+      editorState: editorState,
+    };
+    
+    const updatedLooks = [...savedLooks, newSavedLook];
+    setSavedLooks(updatedLooks);
+    localStorage.setItem('savedLooks', JSON.stringify(updatedLooks));
+
+  }, [displayImageUrl, modelImageUrl, editorState, savedLooks, isLookSaved]);
+
+  const handleLoadLook = useCallback((lookId: string) => {
+    if (isBusy) return;
+    const lookToLoad = savedLooks.find(look => look.id === lookId);
+    if (lookToLoad) {
+      clearSuggestions();
+      setError(null);
+      resetEditorState(lookToLoad.editorState);
+    }
+  }, [isBusy, savedLooks, resetEditorState]);
+
+  const handleDeleteLook = useCallback((lookId: string) => {
+    const updatedLooks = savedLooks.filter(look => look.id !== lookId);
+    setSavedLooks(updatedLooks);
+    localStorage.setItem('savedLooks', JSON.stringify(updatedLooks));
+  }, [savedLooks]);
+
+  const handleShareLook = useCallback(async () => {
+    if (!displayImageUrl) return;
+
+    try {
+      const response = await fetch(displayImageUrl);
+      const blob = await response.blob();
+      const file = new File([blob], 'fit-check-outfit.png', { type: blob.type });
+
+      if (navigator.share && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          title: 'Fit Check Outfit',
+          text: 'Check out my new look created with Fit Check!',
+          files: [file],
+        });
+      } else {
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'fit-check-outfit.png';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(getFriendlyErrorMessage(message, 'Could not share or download the image'));
+    }
+  }, [displayImageUrl]);
+
+  const handleGeneratePhotoshoot = useCallback(async () => {
+    if (!displayImageUrl || isBusy) return;
+    
+    setError(null);
+    setIsPhotoshootModalOpen(true);
+    setIsShooting(true);
+    setPhotoshootResult([]);
+
+    try {
+      const results = await generatePhotoshoot(displayImageUrl);
+      setPhotoshootResult(results);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(getFriendlyErrorMessage(message, 'AI Photoshoot failed'));
+      setIsPhotoshootModalOpen(false);
+    } finally {
+      setIsShooting(false);
+    }
+  }, [displayImageUrl, isBusy]);
+
 
   const viewVariants = {
     initial: { opacity: 0, y: 15 },
@@ -318,13 +533,22 @@ const App: React.FC = () => {
                     <Canvas 
                       displayImageUrl={displayImageUrl}
                       onStartOver={handleStartOver}
-                      isLoading={isLoading}
+                      isLoading={isBusy}
                       loadingMessage={loadingMessage}
                       onSelectPose={handlePoseSelect}
                       poseInstructions={POSE_INSTRUCTIONS}
                       currentPoseIndex={currentPoseIndex}
                       availablePoseKeys={availablePoseKeys}
                       onGenerateBackground={handleBackgroundChange}
+                      onSaveLook={handleSaveLook}
+                      onShareLook={handleShareLook}
+                      isLookSaved={isLookSaved}
+                      onUndo={undo}
+                      onRedo={redo}
+                      canUndo={canUndo}
+                      canRedo={canRedo}
+                      onGeneratePhotoshoot={handleGeneratePhotoshoot}
+                      isShooting={isShooting}
                     />
                   </div>
     
@@ -348,7 +572,6 @@ const App: React.FC = () => {
                         )}
                         <OutfitStack 
                           outfitHistory={activeOutfitLayers}
-                          onRemoveLastGarment={handleRemoveLastGarment}
                           onAskStylist={handleGetSuggestion}
                           isStyling={isStyling}
                           stylistSuggestion={stylistSuggestion}
@@ -357,8 +580,14 @@ const App: React.FC = () => {
                         <WardrobePanel
                           onGarmentSelect={handleGarmentSelect}
                           activeGarmentIds={activeGarmentIds}
-                          isLoading={isLoading}
+                          isLoading={isBusy}
                           wardrobe={wardrobe}
+                        />
+                        <SavedLooksPanel
+                          savedLooks={savedLooks}
+                          onLoadLook={handleLoadLook}
+                          onDeleteLook={handleDeleteLook}
+                          isLoading={isBusy}
                         />
                       </div>
                   </aside>
@@ -386,6 +615,12 @@ const App: React.FC = () => {
       <LegalModal content={modalContent === 'privacy' || modalContent === 'terms' ? modalContent : null} onClose={() => setModalContent(null)} />
       <SupportModal isOpen={modalContent === 'support'} onClose={() => setModalContent(null)} />
       {showTutorial && modelImageUrl && <Tutorial onFinish={handleTutorialFinish} />}
+      <PhotoshootModal 
+        isOpen={isPhotoshootModalOpen}
+        onClose={() => setIsPhotoshootModalOpen(false)}
+        images={photoshootResult}
+        isLoading={isShooting}
+      />
     </div>
   );
 };

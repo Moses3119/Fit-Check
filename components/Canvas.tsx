@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
 */
 import React, { useState } from 'react';
-import { RotateCcwIcon, ChevronLeftIcon, ChevronRightIcon, MountainIcon } from './icons';
+import { RotateCcwIcon, ChevronLeftIcon, ChevronRightIcon, MountainIcon, HeartIcon, ShareIcon, RotateCwIcon, CameraIcon } from './icons';
 import Spinner from './Spinner';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -17,9 +17,37 @@ interface CanvasProps {
   currentPoseIndex: number;
   availablePoseKeys: string[];
   onGenerateBackground: (prompt: string) => Promise<void>;
+  onSaveLook: () => void;
+  onShareLook: () => void;
+  isLookSaved: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onGeneratePhotoshoot: () => void;
+  isShooting: boolean;
 }
 
-const Canvas: React.FC<CanvasProps> = ({ displayImageUrl, onStartOver, isLoading, loadingMessage, onSelectPose, poseInstructions, currentPoseIndex, availablePoseKeys, onGenerateBackground }) => {
+const Canvas: React.FC<CanvasProps> = ({ 
+  displayImageUrl, 
+  onStartOver, 
+  isLoading, 
+  loadingMessage, 
+  onSelectPose, 
+  poseInstructions, 
+  currentPoseIndex, 
+  availablePoseKeys, 
+  onGenerateBackground,
+  onSaveLook,
+  onShareLook,
+  isLookSaved,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+  onGeneratePhotoshoot,
+  isShooting,
+}) => {
   const [isPoseMenuOpen, setIsPoseMenuOpen] = useState(false);
   const [isBackgroundMenuOpen, setIsBackgroundMenuOpen] = useState(false);
   const [backgroundPrompt, setBackgroundPrompt] = useState('');
@@ -90,13 +118,48 @@ const Canvas: React.FC<CanvasProps> = ({ displayImageUrl, onStartOver, isLoading
 
   return (
     <div className="w-full h-full flex items-center justify-center p-4 relative animate-zoom-in group">
-      <button 
-          onClick={onStartOver}
-          className="absolute top-4 left-4 z-30 flex items-center justify-center text-center bg-white/60 dark:bg-gray-800/60 border border-gray-300/80 dark:border-gray-700/80 text-gray-700 dark:text-gray-200 font-semibold py-2 px-4 rounded-full transition-all duration-200 ease-in-out hover:bg-white dark:hover:bg-gray-800 hover:border-gray-400 active:scale-95 text-sm backdrop-blur-sm"
-      >
-          <RotateCcwIcon className="w-4 h-4 mr-2" />
-          Start Over
-      </button>
+      <div className="absolute top-4 left-4 z-30 flex items-center gap-2">
+        <button 
+            onClick={onStartOver}
+            className="flex items-center justify-center text-center bg-white/60 dark:bg-gray-800/60 border border-gray-300/80 dark:border-gray-700/80 text-gray-700 dark:text-gray-200 font-semibold py-2 px-4 rounded-full transition-all duration-200 ease-in-out hover:bg-white dark:hover:bg-gray-800 hover:border-gray-400 active:scale-95 text-sm backdrop-blur-sm"
+        >
+            <RotateCcwIcon className="w-4 h-4 mr-2" />
+            Start Over
+        </button>
+        <div className="w-px h-6 bg-gray-300/80 dark:bg-gray-700/80"></div>
+        <button onClick={onUndo} disabled={!canUndo || isLoading} className="p-2 rounded-full bg-white/60 dark:bg-gray-800/60 border border-gray-300/80 dark:border-gray-700/80 text-gray-700 dark:text-gray-200 transition-all hover:bg-white dark:hover:bg-gray-800 active:scale-95 backdrop-blur-sm disabled:opacity-50 disabled:cursor-not-allowed" title="Undo"><RotateCcwIcon className="w-5 h-5" /></button>
+        <button onClick={onRedo} disabled={!canRedo || isLoading} className="p-2 rounded-full bg-white/60 dark:bg-gray-800/60 border border-gray-300/80 dark:border-gray-700/80 text-gray-700 dark:text-gray-200 transition-all hover:bg-white dark:hover:bg-gray-800 active:scale-95 backdrop-blur-sm disabled:opacity-50 disabled:cursor-not-allowed" title="Redo"><RotateCwIcon className="w-5 h-5" /></button>
+      </div>
+      
+      <div className="absolute top-4 right-4 z-30 flex items-center gap-2">
+         <button 
+          onClick={onGeneratePhotoshoot}
+          className="flex items-center justify-center p-2.5 rounded-full transition-all duration-200 ease-in-out active:scale-95 backdrop-blur-sm bg-white/60 dark:bg-gray-800/60 border border-gray-300/80 dark:border-gray-700/80 text-gray-700 dark:text-gray-200 hover:bg-white dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+          aria-label="AI Photoshoot"
+          title="AI Photoshoot"
+          disabled={isLoading}
+        >
+          { isShooting ? <Spinner className="w-5 h-5" /> : <CameraIcon className={`w-5 h-5 transition-all`} /> }
+        </button>
+         <button 
+          onClick={onSaveLook}
+          className="flex items-center justify-center p-2.5 rounded-full transition-all duration-200 ease-in-out active:scale-95 backdrop-blur-sm bg-white/60 dark:bg-gray-800/60 border border-gray-300/80 dark:border-gray-700/80 text-gray-700 dark:text-gray-200 hover:bg-white dark:hover:bg-gray-800 disabled:opacity-50"
+          aria-label="Save Look"
+          title="Save Look"
+          disabled={isLookSaved || isLoading}
+        >
+          <HeartIcon className={`w-5 h-5 transition-all ${isLookSaved ? 'text-red-500 fill-red-500' : ''}`} />
+        </button>
+        <button 
+          onClick={onShareLook}
+          className="flex items-center justify-center p-2.5 rounded-full bg-white/60 dark:bg-gray-800/60 border border-gray-300/80 dark:border-gray-700/80 text-gray-700 dark:text-gray-200 transition-all duration-200 ease-in-out hover:bg-white dark:hover:bg-gray-800 active:scale-95 backdrop-blur-sm disabled:opacity-50"
+          aria-label="Share Look"
+          title="Share Look"
+          disabled={isLoading}
+        >
+          <ShareIcon className="w-5 h-5" />
+        </button>
+      </div>
 
       <div className="relative w-full h-full flex items-center justify-center">
         {displayImageUrl ? (
@@ -114,7 +177,7 @@ const Canvas: React.FC<CanvasProps> = ({ displayImageUrl, onStartOver, isLoading
         )}
         
         <AnimatePresence>
-          {isLoading && (
+          {isLoading && !isShooting && (
               <motion.div
                   className="absolute inset-0 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md flex flex-col items-center justify-center z-20 rounded-lg"
                   initial={{ opacity: 0 }}

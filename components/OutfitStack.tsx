@@ -5,21 +5,20 @@
 
 import React from 'react';
 import { OutfitLayer, ColorPalette } from '../types';
-import { Trash2Icon, LightbulbIcon } from './icons';
+import { LightbulbIcon } from './icons';
 import { motion, AnimatePresence } from 'framer-motion';
 import Spinner from './Spinner';
 
 
 interface OutfitStackProps {
   outfitHistory: OutfitLayer[];
-  onRemoveLastGarment: () => void;
   onAskStylist: () => void;
   isStyling: boolean;
   stylistSuggestion: string | null;
   colorPalette: ColorPalette | null;
 }
 
-const OutfitStack: React.FC<OutfitStackProps> = ({ outfitHistory, onRemoveLastGarment, onAskStylist, isStyling, stylistSuggestion, colorPalette }) => {
+const OutfitStack: React.FC<OutfitStackProps> = ({ outfitHistory, onAskStylist, isStyling, stylistSuggestion, colorPalette }) => {
   
   return (
     <div className="flex flex-col" id="outfit-stack-panel">
@@ -82,18 +81,9 @@ const OutfitStack: React.FC<OutfitStackProps> = ({ outfitHistory, onRemoveLastGa
                   {layer.garment ? layer.garment.name : 'Base Model'}
                 </span>
             </div>
-            {index > 0 && index === outfitHistory.length - 1 && (
-               <button
-                onClick={onRemoveLastGarment}
-                className="flex-shrink-0 text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-500 transition-colors p-2 rounded-md hover:bg-red-50 dark:hover:bg-red-900/30"
-                aria-label={`Remove ${layer.garment?.name}`}
-              >
-                <Trash2Icon className="w-5 h-5" />
-              </button>
-            )}
           </div>
         ))}
-        {outfitHistory.length === 1 && (
+        {outfitHistory.length <= 1 && (
             <p className="text-center text-sm text-gray-500 dark:text-gray-400 pt-4">Your stacked items will appear here. Select an item from the wardrobe below.</p>
         )}
       </div>
