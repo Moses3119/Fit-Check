@@ -7,6 +7,7 @@ export interface WardrobeItem {
   id: string;
   name: string;
   url: string;
+  type: 'top';
 }
 
 export interface OutfitLayer {
@@ -20,7 +21,7 @@ export interface EditorState {
   modelImageUrl: string | null;
   outfitHistory: OutfitLayer[];
   currentOutfitIndex: number;
-  currentPoseIndex: number;
+  currentPose: string;
 }
 
 export interface SavedLook {

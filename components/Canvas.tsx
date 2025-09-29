@@ -2,20 +2,20 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
 */
-import React, { useState } from 'react';
-import { RotateCcwIcon, ChevronLeftIcon, ChevronRightIcon, MountainIcon, HeartIcon, ShareIcon, RotateCwIcon, CameraIcon } from './icons';
+import React, { useState, useRef } from 'react';
+import { RotateCcwIcon, ChevronLeftIcon, ChevronRightIcon, MountainIcon, HeartIcon, ShareIcon, RotateCwIcon, CameraIcon, CalendarIcon, ZoomInIcon, MaximizeIcon } from './icons';
 import Spinner from './Spinner';
 import { AnimatePresence, motion } from 'framer-motion';
+import { cn } from '../lib/utils';
 
 interface CanvasProps {
   displayImageUrl: string | null;
   onStartOver: () => void;
   isLoading: boolean;
   loadingMessage: string;
-  onSelectPose: (index: number) => void;
+  onSelectPose: (pose: string) => void;
   poseInstructions: string[];
-  currentPoseIndex: number;
-  availablePoseKeys: string[];
+  currentPose: string;
   onGenerateBackground: (prompt: string) => Promise<void>;
   onSaveLook: () => void;
   onShareLook: () => void;
@@ -26,6 +26,7 @@ interface CanvasProps {
   canRedo: boolean;
   onGeneratePhotoshoot: () => void;
   isShooting: boolean;
+  onOpenEventStylist: () => void;
 }
 
 const Canvas: React.FC<CanvasProps> = ({ 
@@ -35,8 +36,7 @@ const Canvas: React.FC<CanvasProps> = ({
   loadingMessage, 
   onSelectPose, 
   poseInstructions, 
-  currentPoseIndex, 
-  availablePoseKeys, 
+  currentPose, 
   onGenerateBackground,
   onSaveLook,
   onShareLook,
@@ -47,55 +47,32 @@ const Canvas: React.FC<CanvasProps> = ({
   canRedo,
   onGeneratePhotoshoot,
   isShooting,
+  onOpenEventStylist,
 }) => {
   const [isPoseMenuOpen, setIsPoseMenuOpen] = useState(false);
   const [isBackgroundMenuOpen, setIsBackgroundMenuOpen] = useState(false);
   const [backgroundPrompt, setBackgroundPrompt] = useState('');
+  const [customPosePrompt, setCustomPosePrompt] = useState('');
+
+  const [isPanZoomMode, setIsPanZoomMode] = useState(false);
+  const [transform, setTransform] = useState({ scale: 1, x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [startPos, setStartPos] = useState({ x: 0, y: 0 });
 
   const BACKGROUND_PRESETS = ["A vibrant city street at night", "A serene beach at sunset", "A minimalist art gallery", "A lush, green forest"];
   
   const handlePreviousPose = () => {
-    if (isLoading || availablePoseKeys.length <= 1) return;
-
-    const currentPoseInstruction = poseInstructions[currentPoseIndex];
-    const currentIndexInAvailable = availablePoseKeys.indexOf(currentPoseInstruction);
-    
-    if (currentIndexInAvailable === -1) {
-        onSelectPose((currentPoseIndex - 1 + poseInstructions.length) % poseInstructions.length);
-        return;
-    }
-
-    const prevIndexInAvailable = (currentIndexInAvailable - 1 + availablePoseKeys.length) % availablePoseKeys.length;
-    const prevPoseInstruction = availablePoseKeys[prevIndexInAvailable];
-    const newGlobalPoseIndex = poseInstructions.indexOf(prevPoseInstruction);
-    
-    if (newGlobalPoseIndex !== -1) {
-        onSelectPose(newGlobalPoseIndex);
-    }
+    if (isLoading) return;
+    const currentIndex = poseInstructions.indexOf(currentPose);
+    const prevIndex = (currentIndex - 1 + poseInstructions.length) % poseInstructions.length;
+    onSelectPose(poseInstructions[prevIndex]);
   };
 
   const handleNextPose = () => {
     if (isLoading) return;
-
-    const currentPoseInstruction = poseInstructions[currentPoseIndex];
-    const currentIndexInAvailable = availablePoseKeys.indexOf(currentPoseInstruction);
-
-    if (currentIndexInAvailable === -1 || availablePoseKeys.length === 0) {
-        onSelectPose((currentPoseIndex + 1) % poseInstructions.length);
-        return;
-    }
-    
-    const nextIndexInAvailable = currentIndexInAvailable + 1;
-    if (nextIndexInAvailable < availablePoseKeys.length) {
-        const nextPoseInstruction = availablePoseKeys[nextIndexInAvailable];
-        const newGlobalPoseIndex = poseInstructions.indexOf(nextPoseInstruction);
-        if (newGlobalPoseIndex !== -1) {
-            onSelectPose(newGlobalPoseIndex);
-        }
-    } else {
-        const newGlobalPoseIndex = (currentPoseIndex + 1) % poseInstructions.length;
-        onSelectPose(newGlobalPoseIndex);
-    }
+    const currentIndex = poseInstructions.indexOf(currentPose);
+    const nextIndex = (currentIndex + 1) % poseInstructions.length;
+    onSelectPose(poseInstructions[nextIndex]);
   };
   
   const handleBackgroundButtonClick = () => {
@@ -114,10 +91,52 @@ const Canvas: React.FC<CanvasProps> = ({
     await onGenerateBackground(preset);
     setBackgroundPrompt('');
     setIsBackgroundMenuOpen(false);
-  }
+  };
+
+  const handleCustomPoseSubmit = () => {
+    if (!customPosePrompt.trim() || isLoading) return;
+    onSelectPose(customPosePrompt);
+    setCustomPosePrompt('');
+  };
+
+  const resetTransform = () => {
+      setTransform({ scale: 1, x: 0, y: 0 });
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+      if (!isPanZoomMode) return;
+      e.preventDefault();
+      const scaleAmount = e.deltaY > 0 ? -0.1 : 0.1;
+      const newScale = Math.min(Math.max(0.5, transform.scale + scaleAmount), 3);
+      setTransform(prev => ({ ...prev, scale: newScale }));
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+      if (!isPanZoomMode || e.button !== 0) return;
+      setIsDragging(true);
+      setStartPos({
+          x: e.clientX - transform.x,
+          y: e.clientY - transform.y,
+      });
+  };
+  
+  const handleMouseMove = (e: React.MouseEvent) => {
+      if (!isPanZoomMode || !isDragging) return;
+      e.preventDefault();
+      const x = e.clientX - startPos.x;
+      const y = e.clientY - startPos.y;
+      setTransform(prev => ({ ...prev, x, y }));
+  };
+
+  const handleMouseUpOrLeave = () => {
+      setIsDragging(false);
+  };
+
+  const isZoomed = transform.scale !== 1 || transform.x !== 0 || transform.y !== 0;
+
 
   return (
-    <div className="w-full h-full flex items-center justify-center p-4 relative animate-zoom-in group">
+    <div className="w-full h-full flex items-center justify-center p-4 relative animate-zoom-in group overflow-hidden">
       <div className="absolute top-4 left-4 z-30 flex items-center gap-2">
         <button 
             onClick={onStartOver}
@@ -132,6 +151,15 @@ const Canvas: React.FC<CanvasProps> = ({
       </div>
       
       <div className="absolute top-4 right-4 z-30 flex items-center gap-2">
+         <button
+            onClick={onOpenEventStylist}
+            className="flex items-center justify-center p-2.5 rounded-full transition-all duration-200 ease-in-out active:scale-95 backdrop-blur-sm bg-white/60 dark:bg-gray-800/60 border border-gray-300/80 dark:border-gray-700/80 text-gray-700 dark:text-gray-200 hover:bg-white dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-label="Event Stylist"
+            title="Event Stylist"
+            disabled={isLoading}
+         >
+            <CalendarIcon className="w-5 h-5" />
+         </button>
          <button 
           onClick={onGeneratePhotoshoot}
           className="flex items-center justify-center p-2.5 rounded-full transition-all duration-200 ease-in-out active:scale-95 backdrop-blur-sm bg-white/60 dark:bg-gray-800/60 border border-gray-300/80 dark:border-gray-700/80 text-gray-700 dark:text-gray-200 hover:bg-white dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -159,15 +187,57 @@ const Canvas: React.FC<CanvasProps> = ({
         >
           <ShareIcon className="w-5 h-5" />
         </button>
+        <div className="w-px h-6 bg-gray-300/80 dark:bg-gray-700/80"></div>
+        <button
+            onClick={() => setIsPanZoomMode(!isPanZoomMode)}
+            className={cn(
+                "flex items-center justify-center p-2.5 rounded-full transition-all duration-200 ease-in-out active:scale-95 backdrop-blur-sm border border-gray-300/80 dark:border-gray-700/80 disabled:opacity-50 disabled:cursor-not-allowed",
+                isPanZoomMode ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white/60 dark:bg-gray-800/60 text-gray-700 dark:text-gray-200 hover:bg-white dark:hover:bg-gray-800'
+            )}
+            aria-label="Toggle Zoom & Pan"
+            title="Toggle Zoom & Pan"
+            disabled={isLoading}
+          >
+            <ZoomInIcon className="w-5 h-5" />
+          </button>
+          <AnimatePresence>
+          {isZoomed && isPanZoomMode && (
+            <motion.button
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              onClick={resetTransform}
+              className="flex items-center justify-center p-2.5 rounded-full transition-all duration-200 ease-in-out active:scale-95 backdrop-blur-sm bg-white/60 dark:bg-gray-800/60 border border-gray-300/80 dark:border-gray-700/80 text-gray-700 dark:text-gray-200 hover:bg-white dark:hover:bg-gray-800"
+              aria-label="Reset View"
+              title="Reset View"
+            >
+              <MaximizeIcon className="w-5 h-5" />
+            </motion.button>
+          )}
+          </AnimatePresence>
       </div>
 
-      <div className="relative w-full h-full flex items-center justify-center">
+      <div 
+        className={cn("relative w-full h-full flex items-center justify-center transition-cursor duration-200", isPanZoomMode && (isDragging ? 'cursor-grabbing' : 'cursor-grab'))}
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUpOrLeave}
+        onMouseLeave={handleMouseUpOrLeave}
+      >
         {displayImageUrl ? (
           <img
             key={displayImageUrl}
             src={displayImageUrl}
             alt="Virtual try-on model"
-            className="max-w-full max-h-full object-contain transition-opacity duration-500 animate-fade-in rounded-lg"
+            className="max-w-full max-h-full object-contain transition-opacity duration-500 animate-fade-in rounded-lg select-none"
+            style={{
+                transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
+                transition: isDragging ? 'none' : 'transform 0.1s ease-out',
+                maxWidth: 'none',
+                maxHeight: 'none',
+            }}
+            draggable={false}
           />
         ) : (
             <div className="w-[400px] h-[600px] bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg flex flex-col items-center justify-center">
@@ -196,10 +266,6 @@ const Canvas: React.FC<CanvasProps> = ({
       {displayImageUrl && !isLoading && (
         <div 
           className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col items-center gap-3"
-          onMouseLeave={() => {
-            setIsPoseMenuOpen(false);
-            setIsBackgroundMenuOpen(false);
-          }}
         >
           <AnimatePresence>
               {isBackgroundMenuOpen && (
@@ -236,36 +302,37 @@ const Canvas: React.FC<CanvasProps> = ({
                   </motion.div>
               )}
           </AnimatePresence>
-
+          
           <AnimatePresence>
-              {isPoseMenuOpen && !isBackgroundMenuOpen && (
-                  <motion.div
-                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      transition={{ duration: 0.2, ease: "easeOut" }}
-                      className="absolute bottom-full mb-3 w-64 bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg rounded-xl p-2 border border-gray-200/80 dark:border-gray-700/80"
-                  >
-                      <div className="grid grid-cols-2 gap-2">
-                          {poseInstructions.map((pose, index) => (
-                              <button
-                                  key={pose}
-                                  onClick={() => onSelectPose(index)}
-                                  disabled={isLoading || index === currentPoseIndex}
-                                  className="w-full text-left text-sm font-medium text-gray-800 dark:text-gray-200 p-2 rounded-md hover:bg-gray-200/70 dark:hover:bg-gray-700/70 disabled:opacity-50 disabled:bg-gray-200/70 dark:disabled:bg-gray-700/70 disabled:font-bold disabled:cursor-not-allowed"
-                              >
-                                  {pose}
-                              </button>
-                          ))}
-                      </div>
-                  </motion.div>
-              )}
+            {isPoseMenuOpen && !isBackgroundMenuOpen && (
+              <motion.div
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  transition={{ duration: 0.2, ease: "easeOut" }}
+                  className="w-80 bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg rounded-xl p-3 border border-gray-200/80 dark:border-gray-700/80 shadow-lg"
+              >
+                  <p className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-2">Describe a pose:</p>
+                  <div className="flex gap-2">
+                      <input
+                          type="text"
+                          value={customPosePrompt}
+                          onChange={(e) => setCustomPosePrompt(e.target.value)}
+                          placeholder="e.g., hand in pocket, looking away"
+                          className="w-full text-sm p-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-gray-800 dark:focus:ring-gray-200 focus:outline-none"
+                          onKeyDown={(e) => e.key === 'Enter' && handleCustomPoseSubmit()}
+                      />
+                      <button onClick={handleCustomPoseSubmit} className="bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-800 px-3 rounded-md hover:bg-gray-600 dark:hover:bg-gray-400 active:scale-95 transition-colors text-sm font-semibold">Go</button>
+                  </div>
+              </motion.div>
+            )}
           </AnimatePresence>
           
           <div 
             id="pose-controls"
             className="flex items-center justify-center gap-2 bg-white/60 dark:bg-gray-800/60 backdrop-blur-md rounded-full p-2 border border-gray-300/50 dark:border-gray-700/50"
             onMouseEnter={() => setIsPoseMenuOpen(true)}
+            onMouseLeave={() => setIsPoseMenuOpen(false)}
           >
             <button 
               onClick={handlePreviousPose}
@@ -275,8 +342,8 @@ const Canvas: React.FC<CanvasProps> = ({
             >
               <ChevronLeftIcon className="w-5 h-5 text-gray-800 dark:text-gray-200" />
             </button>
-            <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 w-48 text-center truncate" title={poseInstructions[currentPoseIndex]}>
-              {poseInstructions[currentPoseIndex]}
+            <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 w-48 text-center truncate" title={currentPose}>
+              {currentPose}
             </span>
             <button 
               onClick={handleNextPose}

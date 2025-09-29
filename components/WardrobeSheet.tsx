@@ -46,10 +46,12 @@ const WardrobeModal: React.FC<WardrobeModalProps> = ({ isOpen, onClose, onGarmen
                 setError('Please select an image file.');
                 return;
             }
+            // FIX: Property 'type' is missing. Added a default type of 'top' for user-uploaded garments.
             const customGarmentInfo: WardrobeItem = {
                 id: `custom-${Date.now()}`,
                 name: file.name,
                 url: URL.createObjectURL(file), // for preview, not used by API
+                type: 'top',
             };
             onGarmentSelect(file, customGarmentInfo);
         }

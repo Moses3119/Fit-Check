@@ -4,6 +4,41 @@
 */
 
 import { GoogleGenAI, GenerateContentResponse, Modality, Type } from "@google/genai";
+import { WardrobeItem } from "../types";
+
+const urlToFile = (url: string, filename: string): Promise<File> => {
+    return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.setAttribute('crossOrigin', 'anonymous');
+
+        image.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = image.naturalWidth;
+            canvas.height = image.naturalHeight;
+
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                return reject(new Error('Could not get canvas context.'));
+            }
+            ctx.drawImage(image, 0, 0);
+
+            canvas.toBlob((blob) => {
+                if (!blob) {
+                    return reject(new Error('Canvas toBlob failed.'));
+                }
+                const mimeType = blob.type || 'image/png';
+                const file = new File([blob], filename, { type: mimeType });
+                resolve(file);
+            }, 'image/png');
+        };
+
+        image.onerror = () => {
+            reject(new Error(`Could not load image from URL. This may be a CORS issue. Check the browser console for more details.`));
+        };
+        image.src = url;
+    });
+};
+
 
 const fileToPart = async (file: File) => {
     const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -76,14 +111,16 @@ export const generateModelImage = async (userImage: File): Promise<string> => {
 export const generateVirtualTryOnImage = async (modelImageUrl: string, garmentImage: File): Promise<string> => {
     const modelImagePart = dataUrlToPart(modelImageUrl);
     const garmentImagePart = await fileToPart(garmentImage);
+    
     const prompt = `You are an expert virtual try-on AI. You will be given a 'model image' and a 'garment image'. Your task is to create a new photorealistic image where the person from the 'model image' is wearing the clothing from the 'garment image'.
 
 **Crucial Rules:**
-1.  **Complete Garment Replacement:** You MUST completely REMOVE and REPLACE the clothing item worn by the person in the 'model image' with the new garment. No part of the original clothing (e.g., collars, sleeves, patterns) should be visible in the final image.
+1.  **Complete Garment Replacement:** You MUST completely REMOVE and REPLACE the corresponding clothing item worn by the person in the 'model image' with the new garment. No part of the original clothing should be visible.
 2.  **Preserve the Model:** The person's face, hair, body shape, and pose from the 'model image' MUST remain unchanged.
 3.  **Preserve the Background:** The entire background from the 'model image' MUST be preserved perfectly.
 4.  **Apply the Garment:** Realistically fit the new garment onto the person. It should adapt to their pose with natural folds, shadows, and lighting consistent with the original scene.
 5.  **Output:** Return ONLY the final, edited image. Do not include any text.`;
+    
     const response = await ai.models.generateContent({
         model: imageModel,
         contents: { parts: [modelImagePart, garmentImagePart, { text: prompt }] },
@@ -96,7 +133,7 @@ export const generateVirtualTryOnImage = async (modelImageUrl: string, garmentIm
 
 export const generatePoseVariation = async (tryOnImageUrl: string, poseInstruction: string): Promise<string> => {
     const tryOnImagePart = dataUrlToPart(tryOnImageUrl);
-    const prompt = `You are an expert fashion photographer AI. Take this image and regenerate it from a different perspective. The person, clothing, and background style must remain identical. The new perspective should be: "${poseInstruction}". Return ONLY the final image.`;
+    const prompt = `You are an expert fashion photographer AI. Take this image and regenerate it. The person, all clothing, and the background style must remain identical. The only change is the person's pose, which should now be: "${poseInstruction}". Return ONLY the final image.`;
     const response = await ai.models.generateContent({
         model: imageModel,
         contents: { parts: [tryOnImagePart, { text: prompt }] },
@@ -120,9 +157,9 @@ export const generateBackground = async (baseImageUrl: string, prompt: string): 
     return handleApiResponse(response);
 };
 
-export const getStyleSuggestion = async (imageUrl: string): Promise<string> => {
+export const getStyleSuggestion = async (imageUrl: string, context?: string): Promise<string> => {
     const imagePart = dataUrlToPart(imageUrl);
-    const prompt = "You are a fashion stylist. Look at the outfit on the person in the image. Suggest one single accessory or clothing item to add that would complement the look. For example, 'a leather belt to define the waist' or 'white sneakers for a casual vibe'. Be concise. Your response should be a short phrase, no more than 15 words.";
+    const prompt = `You are a fashion stylist. Look at the outfit on the person in the image. Suggest one single accessory or clothing item to add that would complement the look ${context || ''}. For example, 'a leather belt to define the waist' or 'white sneakers for a casual vibe'. Be concise. Your response should be a short phrase, no more than 15 words.`;
     
     const response = await ai.models.generateContent({
       model: textModel,
@@ -210,4 +247,73 @@ export const generatePhotoshoot = async (baseImageUrl: string): Promise<string[]
     });
 
     return Promise.all(photoshootPromises);
+};
+
+export const repatternGarment = async (baseImageUrl: string, garmentName: string, patternPrompt: string): Promise<string> => {
+    const baseImagePart = dataUrlToPart(baseImageUrl);
+    const prompt = `You are a fashion AI specializing in textile design. You will be given an image of a person wearing an outfit and a text prompt describing a new pattern. Your task is to find the garment named '${garmentName}' and seamlessly replace its current pattern/color with the new one described in the prompt: '${patternPrompt}'. IMPORTANT: Do not alter the person, their pose, the background, or any other clothing items. The lighting, shadows, and folds on the repatterned garment must look natural and consistent with the original image. Return ONLY the edited image.`;
+
+    const response = await ai.models.generateContent({
+        model: imageModel,
+        contents: { parts: [baseImagePart, { text: prompt }] },
+        config: {
+            responseModalities: [Modality.IMAGE, Modality.TEXT],
+        },
+    });
+    return handleApiResponse(response);
+}
+
+export const getLookbookStory = async (imageUrl: string): Promise<string> => {
+    const imagePart = dataUrlToPart(imageUrl);
+    const prompt = "You are a creative writer for a high-fashion magazine. Look at the person and their outfit in this image. Write a short, evocative \"lookbook\" description (2-3 sentences) that captures the mood and style of their ensemble. Be creative and descriptive.";
+    
+    const response = await ai.models.generateContent({
+      model: textModel,
+      contents: { parts: [imagePart, { text: prompt }] },
+    });
+    
+    if (response.promptFeedback?.blockReason) {
+        throw new Error(`Request was blocked: ${response.promptFeedback.blockReason}`);
+    }
+    
+    const story = response.text;
+    if (!story) {
+      throw new Error('The AI model did not provide a story.');
+    }
+    return story;
+};
+
+export const cleanupGarmentImage = async (garmentFile: File): Promise<File> => {
+    const garmentPart = await fileToPart(garmentFile);
+    const prompt = `You are a photo editor for an e-commerce store. Your task is to take this image of a garment and prepare it for a product catalog. Isolate the main clothing item, removing any background, hangers, tags, or people. Correct the lighting to be bright and even. Place the cleaned-up garment on a pure white background (#FFFFFF). Return ONLY the edited image.`;
+
+    const response = await ai.models.generateContent({
+        model: imageModel,
+        contents: { parts: [garmentPart, { text: prompt }] },
+        config: {
+            responseModalities: [Modality.IMAGE, Modality.TEXT],
+        },
+    });
+    const dataUrl = handleApiResponse(response);
+    return await urlToFile(dataUrl, `enhanced-${garmentFile.name}`);
+};
+
+export const generateBlendedGarment = async (item1: WardrobeItem, item2: WardrobeItem): Promise<File> => {
+    const file1 = await urlToFile(item1.url, item1.name);
+    const file2 = await urlToFile(item2.url, item2.name);
+    
+    const part1 = await fileToPart(file1);
+    const part2 = await fileToPart(file2);
+
+    const prompt = `You are an avant-garde AI fashion designer. You will be given two garment images. Your task is to invent a single, new clothing item that creatively fuses the core characteristics (style, fabric, pattern, silhouette) of both inputs. The result should be a novel, imaginative design. Present the final creation on a clean, neutral studio background. Return ONLY the image of the newly designed garment.`;
+
+    const response = await ai.models.generateContent({
+        model: imageModel,
+        contents: { parts: [part1, part2, { text: prompt }] },
+        config: {
+            responseModalities: [Modality.IMAGE, Modality.TEXT],
+        },
+    });
+    const dataUrl = handleApiResponse(response);
+    return await urlToFile(dataUrl, `blend-${item1.name}-${item2.name}.png`);
 };
